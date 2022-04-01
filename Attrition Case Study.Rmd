@@ -1,0 +1,123 @@
+---
+title: "Attrition Case Study"
+author: "Scott Lovelady"
+date: "11/21/2021"
+output: 
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+```
+
+
+## Load data and packages
+
+
+```{r}
+library(tidyverse)
+library(caret)
+
+bi <- read.csv("bioimplants.csv")
+
+summary(bi)
+
+glimpse(bi)
+
+```
+
+
+### Attrition Rate
+
+
+```{r}
+#attrition rate
+mean(bi$attrition == "Yes")
+
+#summary table: attrition by department and job role
+bi %>%
+  group_by(department, job_role) %>%
+  summarize(attrition = mean(attrition == "Yes")) %>%
+  arrange(desc(attrition))
+
+
+```
+
+### Logistic Regression Model
+
+
+```{r}
+# Fit glm model using caret (to get cross-validation estimates of model's 
+# out of sample performance)
+
+set.seed(123)
+
+#use caret for glm model
+caret_mod <- train(attrition ~ ., 
+                   method = "glm", 
+                   data = subset(bi, select = - employee_number),
+                   preProcess = c("center", "scale"))
+summary(caret_mod) %>% coefficients %>% round(2)
+
+#estimate in-sample performance
+(predict(caret_mod, newdata = bi) == bi$attrition) %>% 
+  mean
+
+#out-of-sample accuracy
+caret_mod
+
+#improvement over predicting with majority class
+0.871999 - mean(bi$attrition == "No")
+
+```
+
+> The glm model offers an improvement of 3 percentage points over predicting with the majority class.
+
+### Leading Predictor 
+
+```{r}
+# Refit the model
+set.seed(123)
+caret_mod <- train(attrition ~ ., 
+                   method = "glm", 
+                   data = subset(bi, select = - c(employee_number, department)),
+                   preProcess = c("center", "scale"))
+summary(caret_mod) %>% coefficients %>% round(2)
+
+```
+
+> The over_time predictor has the largest effect size. The over_time coefficient of 0.89 represents an increase of 0.89 in the log odds of attrition when an employee works more than 40 hours per week.
+
+### Policy Change
+
+```{r}
+#churn if no one works overtime
+newp <- predict(caret_mod, 
+        newdata = (bi %>% mutate(over_time = "No") %>% subset(select = - employee_number)),
+        type = "prob")$Yes %>% 
+  mean
+
+#existing churn
+existingp <- mean(bi$attrition == "Yes")
+
+#change in percentage points if no overtime
+(existingp - newp) * 100
+
+#percent change in attrition if no overtime
+(existingp - newp)  / (existingp ) * 100
+
+#attrition by overtime
+bi %>%
+  group_by(over_time) %>%
+  summarize(attrition = mean(attrition == "Yes")) %>%
+  arrange(desc(attrition))
+
+```
+
+> The company should restrict employees from working more than 40 hours per week to reduce attrition. This policy change would decrease the likelihood of churn by almost 6 percentage points (a 36% decrease).
+
+### Recommendation
+
+> The company should restrict employees from working more than 40 hours per week. Employees that work overtime were 3 times more likely to quit in 2016 compared to employees that did not work overtime (30% attrition versus 10% attrition, respectively). Eliminating overtime would reduce the company-wide attrition rate by 36% (16% attrition with overtime versus 10% attrition without overtime).
